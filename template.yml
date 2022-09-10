@@ -1,0 +1,601 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: "Universal resources that are utilized by individual Minecraft server stacks."
+
+Parameters:
+  Tier:
+    Description: Computing resources tiers
+    Type: String
+    Default: Tier1 # TODO - remove this default
+    AllowedValues:
+      - Tier1
+      # TODO - add more tiers - Note that these must have a matching mapping within the ResourceMap below
+
+  Edition:
+    Description: "Specifier of 'Java' or 'Bedrock' Minecraft Edition"
+    Type: String
+    AllowedValues:
+      - Java
+      - Bedrock
+    Default: Java # TODO - remove this default
+
+  TargetServerVersion:
+    Description: Desired version of Minecraft to run
+    Type: String
+    Default: latest
+  
+  ShutdownTimeout:
+    Description: The amount of time (in minutes) to wait before shutting down after the last player disconnects
+    Type: Number
+    Default: 10
+  
+  MOTD:
+    Description: Message of the day
+    Type: String
+    Default: Smarter Servers
+
+  PowerOnFnTag:
+    Description: Tag name of the power-on-mc-server-lambda-fn Lambda Function
+    Type: String
+    Default: v0.1.0
+
+  WatchdogImageTag:
+    Description: Tag name of the power-on-mc-server-lambda-fn Lambda Function
+    Type: String
+    Default: test # TODO - change to v0.1.0
+
+  HostedZoneID:
+    Description: The ID of the mc.smarterservers.net. hosted zone
+    Type: String
+    Default: Z035950435PL23XW9G5G4 # TODO - remove default value?
+  
+  CloudWatchLogsQueryLogGroupArn:
+    Type: String
+    AllowedPattern: "^arn:.*"
+    ConstraintDescription: "Must be a valid ARN"
+    Default: arn:aws:logs:us-east-1:370163806910:log-group:/aws/route53/mc.smarterservers.net:* # TODO - remove this default
+  
+  Domain:
+    Description: The domain (default mc.smarterservers.net)
+    Type: String
+    Default: mc.smarterservers.net
+
+
+Mappings:
+  EditionMap:
+    Java:
+      Image: itzg/minecraft-server
+      Port: 25565
+      Protocol: tcp
+    Bedrock:
+      Image: itzg/minecraft-bedrock-server
+      Port: 19132
+      Protocol: udp
+
+  # The container values are computed as follows:
+  # TaskCpu = Task CPU - 256 (used by watchdog container)
+  # TaskMemory = Task Memory - 512 (used by watchdog container)
+  ResourceMap:
+    Tier1:
+      TaskCpu: '1024'
+      TaskMemory: '2048'
+      ContainerCpu: '768' 
+      ContainerMemory: '1456'
+
+
+
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties: 
+      CidrBlock: "10.0.0.0/16"
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+  
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: 
+      VpcId: !Ref VPC
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  InternetGatewayVPCAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: 
+      InternetGatewayId: !GetAtt InternetGateway.InternetGatewayId
+      VpcId: !Ref VPC
+  
+  InternetGatewayRouteTableRecord:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGateway
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !GetAtt InternetGateway.InternetGatewayId
+  
+  # IncomingMinecraftTrafficRouteTableRecord:
+  #   Type: AWS::EC2::Route
+  #   Properties:
+  #     RouteTableId: !Ref RouteTable
+  #     DestinationCidrBlock: 0.0.0.0/0
+  #     GatewayId: !GetAtt InternetGateway.InternetGatewayId
+
+  Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: "10.0.0.0/16"
+      VpcId: !Ref VPC
+  
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      RouteTableId: !Ref RouteTable
+      SubnetId: !Ref Subnet
+
+
+
+
+
+  # TODO - Attempt to edit the VPC's default security group instead of creating a new one like I'm doing here...
+  # See the commented out code below this resource
+  MCServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupName: !Sub 'mc-${Edition}-security-${AWS::StackId}'
+      GroupDescription: !Sub 'Security Group for ${Edition} Minecraft Server in stack ${AWS::StackName}'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: !FindInMap [ EditionMap, !Ref Edition, Protocol ]
+          FromPort: !FindInMap [ EditionMap, !Ref Edition, Port ]
+          ToPort: !FindInMap [ EditionMap, !Ref Edition, Port ]
+          CidrIp: 0.0.0.0/0
+          # SourceSecurityGroupId: !GetAtt VPC.DefaultSecurityGroup
+        # Allow INBOUND NFS access (so that NFS is accessible)
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          CidrIp: 0.0.0.0/0
+          # SourceSecurityGroupId: !GetAtt VPC.DefaultSecurityGroup
+      # Allow OUTBOUND NFS access (so that ECS task can access NFS)
+      SecurityGroupEgress:
+        - 
+          # DestinationSecurityGroupId: !GetAtt VPC.DefaultSecurityGroup
+          CidrIp: 0.0.0.0/0
+          Description: !Sub 'Inbound security rule for allowing EFS access within VPC in ${AWS::StackName}.'
+          IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+
+
+
+  # MCServerInboundSecurityRule:
+  #   Type: AWS::EC2::SecurityGroupIngress
+  #   Properties:
+  #     GroupId: !GetAtt VPC.DefaultSecurityGroup
+  #     IpProtocol: !FindInMap [ EditionMap, !Ref Edition, Port ]
+  #     FromPort: !FindInMap [ EditionMap, !Ref Edition, Port ]
+  #     ToPort: !FindInMap [ EditionMap, !Ref Edition, Port ]
+  
+  # NFSInboundSecurityRule:
+  #   Type: AWS::EC2::SecurityGroupIngress
+  #   Properties:
+  #     GroupId: !GetAtt VPC.DefaultSecurityGroup
+  #     IpProtocol: tcp
+  #     FromPort: 2049
+  #     ToPort: 2049
+  
+  # NFSOutboundSecurityRule:
+  #   Type: AWS::EC2::SecurityGroupEgress
+  #   Properties:
+  #     DestinationSecurityGroupId: !GetAtt VPC.DefaultSecurityGroup
+  #     GroupId: !GetAtt VPC.DefaultSecurityGroup
+  #     Description: !Sub 'Inbound security rule for allowing EFS access within VPC in ${AWS::StackName}.'
+  #     IpProtocol: tcp
+  #     FromPort: 2049
+  #     ToPort: 2049
+  
+
+
+
+
+  EFS:
+    Type: AWS::EFS::FileSystem
+    # Properties: 
+      # POSSIBLE TODO
+      # Encrypted: Boolean
+      # FileSystemPolicy: Json
+      # AvailabilityZoneName: String
+  
+  EFSAccessPoint:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !Ref EFS
+      PosixUser: 
+        Gid: '1000'
+        Uid: '1000'
+      RootDirectory:
+        Path: '/minecraft'
+        CreationInfo: 
+          OwnerGid: '1000'
+          OwnerUid: '1000'
+          Permissions: '0755'
+
+  EFSMount:
+    Type: AWS::EFS::MountTarget
+    Properties: 
+      FileSystemId: !Ref EFS
+      SecurityGroups: 
+        - !Ref MCServerSecurityGroup
+      SubnetId: !Ref Subnet
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+
+  S3BucketAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-java-mc-server-bucket-access-definition-role'
+      Description: !Sub "Execution role for accessing the S3 bucket in ${AWS::StackName}"
+      ManagedPolicyArns:
+        - !Ref S3BucketAccessPolicy
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: datasync.amazonaws.com
+          Action:
+            - 'sts:AssumeRole'
+
+  S3BucketAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub '${AWS::StackName}-java-mc-server-s3-bucket-access-policy'
+      Description: !Sub "Managed Policy for accessing the contents of the s3 bucket in ${AWS::StackName}"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: [ 's3:*' ]
+            Resource:
+              # Grant access for both the bucket and items inside
+              - !GetAtt S3Bucket.Arn
+              - !Sub '${S3Bucket.Arn}/*'
+
+  S3BucketDataSyncLocation:
+    Type: AWS::DataSync::LocationS3
+    Properties: 
+      S3BucketArn: !GetAtt S3Bucket.Arn
+      S3Config: 
+        BucketAccessRoleArn: !GetAtt S3BucketAccessRole.Arn
+
+  EFSDataSyncLocation:
+    Type: AWS::DataSync::LocationEFS
+    DependsOn: EFSMount # there is an issue where this doesn't realize the EFSMount is created and the stack deploy fails
+    Properties: 
+      # AccessPointArn: String
+      Ec2Config:
+        SecurityGroupArns: 
+          - !Sub 'arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${MCServerSecurityGroup}'
+        SubnetArn: !Sub 'arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${Subnet}'
+      EfsFilesystemArn: !GetAtt EFS.Arn
+      InTransitEncryption: TLS1_2
+      # FileSystemAccessRoleArn: String
+      Subdirectory: '/minecraft'
+
+
+  EFSToS3DataSyncTask:
+    Type: AWS::DataSync::Task
+    Properties:
+      Name: !Sub '${AWS::StackName}-efs-to-s3-datasync'
+      SourceLocationArn: !Ref EFSDataSyncLocation
+      DestinationLocationArn: !Ref S3BucketDataSyncLocation
+      Excludes: 
+        - FilterType: SIMPLE_PATTERN
+          Value: '/*.jar'
+      Includes: 
+        - FilterType: SIMPLE_PATTERN
+          Value: '/banned-ips.json|/baned-players.json|/logs/latest.log|/ops.json|/server.properties|/usercache.json|/whitelist.json'
+      Options: 
+        OverwriteMode: ALWAYS
+        PreserveDeletedFiles: PRESERVE
+  
+  S3ToEFSDataSyncTask:
+    Type: AWS::DataSync::Task
+    Properties:
+      Name: !Sub '${AWS::StackName}-s3-to-efs-datasync'
+      SourceLocationArn: !Ref S3BucketDataSyncLocation
+      DestinationLocationArn: !Ref EFSDataSyncLocation
+      Includes: 
+        - FilterType: SIMPLE_PATTERN
+          Value: '/banned-ips.json|/baned-players.json|/ops.json|/server.properties|/whitelist.json'
+      Options:
+        OverwriteMode: ALWAYS
+        PreserveDeletedFiles: PRESERVE
+        Gid: NONE
+        PosixPermissions: NONE
+
+  TaskDefinitionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-mc-server-task-definition-role'
+      Description: !Sub "Execution role for the server task container definition in ${AWS::StackName}"
+      ManagedPolicyArns:
+        - !Ref TaskDefinitionPolicy
+        - !Ref ECSNetworkingPolicy
+        - !Ref Route53RecordManagementPolicy
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: ecs-tasks.amazonaws.com
+          Action:
+            - 'sts:AssumeRole'
+
+  TaskDefinitionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub '${AWS::StackName}-mc-server-task-definition-policy'
+      Description: !Sub "Managed Policy for the server task container definition in ${AWS::StackName}"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: [ 'logs:Create*', 'logs:Put*' ]
+            Resource: 
+              - !GetAtt WatchdogContainerLogGroup.Arn
+              - !GetAtt MCServerContainerLogGroup.Arn
+  
+  ECSNetworkingPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub '${AWS::StackName}-mc-server-task-networking-policy'
+      Description: !Sub 'Managed Policy for networking within cluster mc-${AWS::StackName}-cluster in ${AWS::StackName}'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: [ 'ecs:*' ]
+            Resource: 
+              - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:service/mc-${AWS::StackName}-cluster/mc-${AWS::StackName}-service'
+              - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/mc-${AWS::StackName}-cluster/*'
+          - Effect: Allow
+            Action: [ 'ec2:DescribeNetworkInterfaces' ]
+            Resource: '*'
+
+  Route53RecordManagementPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub '${AWS::StackName}-mc-server-route-53-record-management-policy'
+      Description: !Sub "Managed Policy for managing Route53 records in ${AWS::StackName}"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: 
+              - 'route53:GetHostedZone'
+              - 'route53:ChangeResourceRecordSets'
+              - 'route53:ListResourceRecordSets'
+            Resource: !Sub 'arn:${AWS::Partition}:route53:::hostedzone/${HostedZoneID}'
+          - Effect: Allow
+            Action: [ 'route53:ListHostedZones' ]
+            Resource: '*'
+
+
+
+
+
+
+
+  # NOTES:
+  # - Every time a task is created, I will need to choose the correct security group
+  # ---- See if there is a way to set the default ^^^^
+  #
+  # ^ this happens in the lambda function so it's not the end of the world. I still want to clean it up and remove the need
+  # to make an extra security group...
+
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub 'mc-${AWS::StackName}-cluster'
+      CapacityProviders: [ 'FARGATE' ]
+
+
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ECSCluster
+      ServiceName: !Sub 'mc-${AWS::StackName}-service'
+      TaskDefinition: !Ref MCServerTaskDefinition
+      DesiredCount: 0
+      PlatformVersion: LATEST
+      CapacityProviderStrategy:
+        - Base: 0
+          CapacityProvider: FARGATE
+          Weight: 1
+      NetworkConfiguration:
+        AwsvpcConfiguration: 
+          SecurityGroups: 
+            - !Ref MCServerSecurityGroup
+          Subnets: 
+            - !Ref Subnet
+
+
+  WatchdogContainerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 7
+      LogGroupName: !Sub '/mc/watchdog-${AWS::StackName}'
+
+  MCServerContainerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 7
+      LogGroupName: !Sub '/mc/${Edition}-${AWS::StackName}'
+  
+  
+
+  # NOTE - these task definitions must be at this level to allow for volume mounting containers
+  MCServerTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    DependsOn: [ WatchdogContainerLogGroup, MCServerContainerLogGroup ]
+    Properties:
+      Cpu: !FindInMap [ ResourceMap, !Ref Tier, TaskCpu ]
+      Memory: !FindInMap [ ResourceMap, !Ref Tier, TaskMemory ]
+      ContainerDefinitions:
+        - Name: !Sub 'mc-watchdog-${AWS::StackName}'
+          Image: !Sub 'smarterservers/minecraft-ecs-watchdog:${WatchdogImageTag}'
+          # CPU & Memory limits for the watchdog container
+          Cpu: '256'
+          Memory: '512'
+          Environment:
+            - Name: MC_EDITION
+              Value: !Ref Edition
+            - Name: REGION
+              Value: !Ref AWS::Region
+            - Name: CLUSTER
+              Value: !Ref ECSCluster
+            - Name: SERVICE
+              Value: !Sub 'mc-${AWS::StackName}-service'
+            - Name: DNS_ZONE
+              Value: !Ref HostedZoneID
+            - Name: SERVER_NAME
+              Value: !Ref AWS::StackName
+            - Name: SHUTDOWN_MIN
+              Value: !Ref ShutdownTimeout
+            - Name: DOMAIN
+              Value: !Ref Domain
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: 
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Sub '/mc/watchdog-${AWS::StackName}'
+              awslogs-stream-prefix: !Ref AWS::StackName
+              awslogs-create-group: "true" # TODO - see if this can be removed
+        - Name: !Sub 'mc-${Edition}-${AWS::StackName}'
+          Image: !Join [ ':', [ !FindInMap [ EditionMap, !Ref Edition, Image ], !Ref TargetServerVersion ] ]
+          Cpu: !FindInMap [ ResourceMap, !Ref Tier, ContainerCpu ]
+          MemoryReservation: !FindInMap [ ResourceMap, !Ref Tier, ContainerMemory ]
+          PortMappings: 
+            - ContainerPort: !FindInMap [ EditionMap, !Ref Edition, Port ]
+              HostPort: !FindInMap [ EditionMap, !Ref Edition, Port ]
+              Protocol: !FindInMap [ EditionMap, !Ref Edition, Protocol ]
+          Environment:
+            - Name: EULA
+              Value: True
+            - Name: MOTD
+              Value: !Ref MOTD
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Sub '/mc/${Edition}-${AWS::StackName}'
+              awslogs-stream-prefix: !Ref AWS::StackName
+              awslogs-create-group: "true" # TODO - see if this can be removed
+          MountPoints: 
+            - ContainerPath: '/data'
+              SourceVolume: !Sub 'data-${AWS::StackName}'
+      # TODO - make these two things separate!!!!
+      # The execution role is what role each of the tasks run in executing, and the TaskRole is what's used for accesing other AWS resources!
+      ExecutionRoleArn: !GetAtt TaskDefinitionRole.Arn
+      TaskRoleArn: !GetAtt TaskDefinitionRole.Arn
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [ FARGATE ]
+      Volumes:
+        - Name: !Sub 'data-${AWS::StackName}'
+          # Host: String # unsure if this is needed
+          EFSVolumeConfiguration:
+            AuthorizationConfig: 
+              AccessPointId: !Ref EFSAccessPoint
+            FilesystemId: !Ref EFS
+            TransitEncryption: ENABLED
+
+  DNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      Comment: !Sub "Route 53 record for {AWS::StackName} minecraft server"
+      Name: !Sub "${AWS::StackName}.${Domain}"
+      ResourceRecords:
+        - 1.1.1.1 # This value does not matter since it will be updated every time a container starts up
+      TTL: 30
+      Type: A
+      HostedZoneName: !Sub '${Domain}.'
+
+  LambdaFnRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-LambdaFnRole'
+      Description: !Sub "Execution role for the PowerOn Lambda function in ${AWS::StackName}"
+      ManagedPolicyArns:
+        - !Ref LambdaFnPolicy
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action:
+            - 'sts:AssumeRole'
+
+  LambdaFnPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub '${AWS::StackName}-PowerOnLambdaFnManagedPolicy'
+      Description: !Sub "Managed Policy for the PowerOn Lambda function in ${AWS::StackName}"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: [ 'ecs:DescribeServices', 'ecs:UpdateService' ]
+            Resource: !Ref ECSService
+          - Effect: Allow
+            Action: [ 'iam:PassRole' ]
+            Resource: !GetAtt TaskDefinitionRole.Arn
+
+  PowerOnFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Role: !GetAtt LambdaFnRole.Arn
+      Timeout: 6
+      Environment:
+        Variables:
+          REGION: !Ref AWS::Region
+          CLUSTER: !Ref ECSCluster
+          SERVICE: !GetAtt ECSService.Name
+          TASK_DEFINITION: !Ref MCServerTaskDefinition
+          SUBNET: !Ref Subnet
+          DEFAULT_SECURITY_GROUP: !GetAtt VPC.DefaultSecurityGroup
+          SECURITY_GROUP: !Ref MCServerSecurityGroup
+      PackageType: Image
+      Code:
+        ImageUri: !Sub '${AWS::AccountId}.dkr.ecr.us-east-1.amazonaws.com/power-on-mc-server-lambda-fn:${PowerOnFnTag}'
+      Description: Powers on a ECS Minecraft Server task
+      TracingConfig:
+        Mode: Active
+
+  PowerOnFnLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 7
+      LogGroupName: !Sub '/aws/lambda/${PowerOnFn}'
+
+  LogGroupInvokeLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt PowerOnFn.Arn
+      Action: lambda:InvokeFunction
+      Principal: logs.amazonaws.com
+      SourceAccount: !Ref 'AWS::AccountId'
+      SourceArn: !Ref CloudWatchLogsQueryLogGroupArn
+
+  QueryLogsSubscriptionFilter:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      DestinationArn: !GetAtt PowerOnFn.Arn
+      FilterPattern: !Sub "\"_minecraft._tcp.${AWS::StackName}.${Domain}\""
+      LogGroupName: !Sub "/aws/route53/${Domain}"
