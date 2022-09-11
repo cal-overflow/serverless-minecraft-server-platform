@@ -487,6 +487,8 @@ Resources:
           Environment:
             - Name: EULA
               Value: True
+            - Name: MEMORY
+              Value: !Join [ '', [ !FindInMap [ ResourceMap, !Ref Tier, ContainerMemory ], 'M' ] ]
             - Name: MOTD
               Value: !Ref MOTD
           LogConfiguration:
