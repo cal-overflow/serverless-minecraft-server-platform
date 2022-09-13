@@ -8,7 +8,11 @@ Parameters:
     Default: Tier1 # TODO - remove this default
     AllowedValues:
       - Tier1
-      # TODO - add more tiers - Note that these must have a matching mapping within the ResourceMap below
+      - Tier2
+      - Tier3
+      - Tier4
+      - Tier5
+      - Tier6
 
   Edition:
     Description: "Specifier of 'Java' or 'Bedrock' Minecraft Edition"
@@ -29,7 +33,7 @@ Parameters:
     Default: 10
   
   MOTD:
-    Description: Message of the day
+    Description: Initial server message of the day (Note this will be overridden by the server properties)
     Type: String
     Default: Smarter Servers
 
@@ -46,13 +50,13 @@ Parameters:
   HostedZoneID:
     Description: The ID of the mc.smarterservers.net. hosted zone
     Type: String
-    Default: Z035950435PL23XW9G5G4 # TODO - remove default value?
+    Default: Z035950435PL23XW9G5G4
   
   CloudWatchLogsQueryLogGroupArn:
     Type: String
     AllowedPattern: "^arn:.*"
     ConstraintDescription: "Must be a valid ARN"
-    Default: arn:aws:logs:us-east-1:370163806910:log-group:/aws/route53/mc.smarterservers.net:* # TODO - remove this default
+    Default: arn:aws:logs:us-east-1:370163806910:log-group:/aws/route53/mc.smarterservers.net:*
   
   Domain:
     Description: The domain (default mc.smarterservers.net)
@@ -76,12 +80,35 @@ Mappings:
   # TaskMemory = Task Memory - 512 (used by watchdog container)
   ResourceMap:
     Tier1:
-      TaskCpu: '1024'
-      TaskMemory: '2048'
-      ContainerCpu: '768' 
+      TaskCpu: '1024' # 1 vCPU
+      TaskMemory: '2048' # 2 GB
+      ContainerCpu: '768'
       ContainerMemory: '1456'
-
-
+    Tier2:
+      TaskCpu: '1024' # 1 vCPU
+      TaskMemory: '4096' # 4 GB
+      ContainerCpu: '768'
+      ContainerMemory: '3584'
+    Tier3:
+      TaskCpu: '2048' # 2 vCPU
+      TaskMemory: '4096' # 4 GB
+      ContainerCpu: '1792'
+      ContainerMemory: '3584'
+    Tier4:
+      TaskCpu: '2048' # 2 vCPU
+      TaskMemory: '8192' # 8 GB
+      ContainerCpu: '1792'
+      ContainerMemory: '7680'
+    Tier5:
+      TaskCpu: '4096' # 4 vCPU
+      TaskMemory: '8192' # 8 GB
+      ContainerCpu: '3840'
+      ContainerMemory: '7680'
+    Tier6:
+      TaskCpu: '4096' # 4 vCPU
+      TaskMemory: '16384' # 16 GB
+      ContainerCpu: '3840'
+      ContainerMemory: '15872'
 
 
 Resources:
