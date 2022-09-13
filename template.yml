@@ -36,12 +36,12 @@ Parameters:
   PowerOnFnTag:
     Description: Tag name of the power-on-mc-server-lambda-fn Lambda Function
     Type: String
-    Default: v0.1.0
+    Default: v0.1.0 # TODO - change to latest
 
   WatchdogImageTag:
     Description: Tag name of the power-on-mc-server-lambda-fn Lambda Function
     Type: String
-    Default: test # TODO - change to v0.1.0
+    Default: test # TODO - change to latest
 
   HostedZoneID:
     Description: The ID of the mc.smarterservers.net. hosted zone
@@ -475,7 +475,6 @@ Resources:
               awslogs-region: !Ref AWS::Region
               awslogs-group: !Sub '/mc/watchdog-${AWS::StackName}'
               awslogs-stream-prefix: !Ref AWS::StackName
-              awslogs-create-group: "true" # TODO - see if this can be removed
         - Name: !Sub 'mc-${Edition}-${AWS::StackName}'
           Image: !Join [ ':', [ !FindInMap [ EditionMap, !Ref Edition, Image ], !Ref TargetServerVersion ] ]
           Cpu: !FindInMap [ ResourceMap, !Ref Tier, ContainerCpu ]
@@ -497,7 +496,6 @@ Resources:
               awslogs-region: !Ref AWS::Region
               awslogs-group: !Sub '/mc/${Edition}-${AWS::StackName}'
               awslogs-stream-prefix: !Ref AWS::StackName
-              awslogs-create-group: "true" # TODO - see if this can be removed
           MountPoints: 
             - ContainerPath: '/data'
               SourceVolume: !Sub 'data-${AWS::StackName}'
