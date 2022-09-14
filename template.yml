@@ -30,22 +30,23 @@ Parameters:
   ShutdownTimeout:
     Description: The amount of time (in minutes) to wait before shutting down after the last player disconnects
     Type: Number
-    Default: 10
+    Default: 5 # TODO - change back to 10
   
   MOTD:
     Description: Initial server message of the day (Note this will be overridden by the server properties)
     Type: String
     Default: Smarter Servers
 
+  # The following parameters are developer-specific and are independent of user input
   PowerOnFnTag:
     Description: Tag name of the power-on-mc-server-lambda-fn Lambda Function
     Type: String
-    Default: v0.1.0 # TODO - change to latest
+    Default: latest
 
   WatchdogImageTag:
-    Description: Tag name of the power-on-mc-server-lambda-fn Lambda Function
+    Description: Tag name of the minecraft-watchdog docker image
     Type: String
-    Default: test # TODO - change to latest
+    Default: test # TODO - make latest
 
   HostedZoneID:
     Description: The ID of the mc.smarterservers.net. hosted zone
@@ -132,7 +133,7 @@ Resources:
     Properties: 
       InternetGatewayId: !GetAtt InternetGateway.InternetGatewayId
       VpcId: !Ref VPC
-  
+
   InternetGatewayRouteTableRecord:
     Type: AWS::EC2::Route
     DependsOn: InternetGateway
@@ -140,32 +141,19 @@ Resources:
       RouteTableId: !Ref RouteTable
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !GetAtt InternetGateway.InternetGatewayId
-  
-  # IncomingMinecraftTrafficRouteTableRecord:
-  #   Type: AWS::EC2::Route
-  #   Properties:
-  #     RouteTableId: !Ref RouteTable
-  #     DestinationCidrBlock: 0.0.0.0/0
-  #     GatewayId: !GetAtt InternetGateway.InternetGatewayId
 
   Subnet:
     Type: AWS::EC2::Subnet
     Properties:
       CidrBlock: "10.0.0.0/16"
       VpcId: !Ref VPC
-  
+
   SubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties: 
       RouteTableId: !Ref RouteTable
       SubnetId: !Ref Subnet
 
-
-
-
-
-  # TODO - Attempt to edit the VPC's default security group instead of creating a new one like I'm doing here...
-  # See the commented out code below this resource
   MCServerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties: 
@@ -177,54 +165,18 @@ Resources:
           FromPort: !FindInMap [ EditionMap, !Ref Edition, Port ]
           ToPort: !FindInMap [ EditionMap, !Ref Edition, Port ]
           CidrIp: 0.0.0.0/0
-          # SourceSecurityGroupId: !GetAtt VPC.DefaultSecurityGroup
         # Allow INBOUND NFS access (so that NFS is accessible)
         - IpProtocol: tcp
           FromPort: 2049
           ToPort: 2049
           CidrIp: 0.0.0.0/0
-          # SourceSecurityGroupId: !GetAtt VPC.DefaultSecurityGroup
-      # Allow OUTBOUND NFS access (so that ECS task can access NFS)
       SecurityGroupEgress:
-        - 
-          # DestinationSecurityGroupId: !GetAtt VPC.DefaultSecurityGroup
-          CidrIp: 0.0.0.0/0
+        # Allow OUTBOUND NFS access (so that ECS task can access NFS)
+        - IpProtocol: tcp
           Description: !Sub 'Inbound security rule for allowing EFS access within VPC in ${AWS::StackName}.'
-          IpProtocol: tcp
+          CidrIp: 0.0.0.0/0
           FromPort: 2049
           ToPort: 2049
-
-
-
-  # MCServerInboundSecurityRule:
-  #   Type: AWS::EC2::SecurityGroupIngress
-  #   Properties:
-  #     GroupId: !GetAtt VPC.DefaultSecurityGroup
-  #     IpProtocol: !FindInMap [ EditionMap, !Ref Edition, Port ]
-  #     FromPort: !FindInMap [ EditionMap, !Ref Edition, Port ]
-  #     ToPort: !FindInMap [ EditionMap, !Ref Edition, Port ]
-  
-  # NFSInboundSecurityRule:
-  #   Type: AWS::EC2::SecurityGroupIngress
-  #   Properties:
-  #     GroupId: !GetAtt VPC.DefaultSecurityGroup
-  #     IpProtocol: tcp
-  #     FromPort: 2049
-  #     ToPort: 2049
-  
-  # NFSOutboundSecurityRule:
-  #   Type: AWS::EC2::SecurityGroupEgress
-  #   Properties:
-  #     DestinationSecurityGroupId: !GetAtt VPC.DefaultSecurityGroup
-  #     GroupId: !GetAtt VPC.DefaultSecurityGroup
-  #     Description: !Sub 'Inbound security rule for allowing EFS access within VPC in ${AWS::StackName}.'
-  #     IpProtocol: tcp
-  #     FromPort: 2049
-  #     ToPort: 2049
-  
-
-
-
 
   EFS:
     Type: AWS::EFS::FileSystem
@@ -233,7 +185,7 @@ Resources:
       # Encrypted: Boolean
       # FileSystemPolicy: Json
       # AvailabilityZoneName: String
-  
+
   EFSAccessPoint:
     Type: AWS::EFS::AccessPoint
     Properties:
@@ -412,19 +364,6 @@ Resources:
             Resource: '*'
 
 
-
-
-
-
-
-  # NOTES:
-  # - Every time a task is created, I will need to choose the correct security group
-  # ---- See if there is a way to set the default ^^^^
-  #
-  # ^ this happens in the lambda function so it's not the end of the world. I still want to clean it up and remove the need
-  # to make an extra security group...
-
-
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties:
@@ -475,7 +414,7 @@ Resources:
       Memory: !FindInMap [ ResourceMap, !Ref Tier, TaskMemory ]
       ContainerDefinitions:
         - Name: !Sub 'mc-watchdog-${AWS::StackName}'
-          Image: !Sub 'smarterservers/minecraft-ecs-watchdog:${WatchdogImageTag}'
+          Image: !Sub 'smarterservers/minecraft-watchdog:${WatchdogImageTag}'
           # CPU & Memory limits for the watchdog container
           Cpu: '256'
           Memory: '512'
@@ -596,8 +535,7 @@ Resources:
           SERVICE: !GetAtt ECSService.Name
           TASK_DEFINITION: !Ref MCServerTaskDefinition
           SUBNET: !Ref Subnet
-          DEFAULT_SECURITY_GROUP: !GetAtt VPC.DefaultSecurityGroup
-          SECURITY_GROUP: !Ref MCServerSecurityGroup
+          SECURITY_GROUPS: !Join [ ',', [ !GetAtt VPC.DefaultSecurityGroup, !Ref MCServerSecurityGroup ] ]
       PackageType: Image
       Code:
         ImageUri: !Sub '${AWS::AccountId}.dkr.ecr.us-east-1.amazonaws.com/power-on-mc-server-lambda-fn:${PowerOnFnTag}'
