@@ -1,0 +1,151 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: "A stack for the smarter-servers.net website"
+
+Parameters:
+  Domain:
+    Type: String
+    Default: smarter-servers.net
+
+  HostedZone:
+    Type: String
+    Default: smarter-servers.net.
+
+  CachePolicyId:
+    Type: String
+    Default: 658327ea-f89d-4fab-a63d-7e88639e58f6 # id for the caching optimized policy
+    # See more policies at https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-cache-policies.html#managed-cache-policies-list
+
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref Domain
+      WebsiteConfiguration:
+        IndexDocument: "index.html"
+        ErrorDocument: "200.html"
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: PublicReadForGetBucketObjects
+            Action: 's3:GetObject'
+            Effect: Allow
+            Principal: '*'
+            Resource: 
+              - !Sub 'arn:aws:s3:::${S3Bucket}/*'
+
+  CloudFrontOriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub 'Origin identity for ${Domain}'
+  
+  WWWCloudFrontOriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub 'Origin identity for www.${Domain}'
+
+  # Note that these ACM Certificate resources will be stuck in creation until the DNS validation is completed
+  # https://docs.aws.amazon.com/acm/latest/userguide/dns-validation.html#setting-up-dns-validation
+  ACMCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref Domain
+      ValidationMethod: DNS
+
+  WWWACMCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Sub 'www.${Domain}'
+      ValidationMethod: DNS
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: CDN for static website served via S3
+        Aliases: [ !Ref Domain ]
+        DefaultCacheBehavior:
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachePolicyId: !Ref CachePolicyId
+          Compress: true
+          TargetOriginId: !Sub 's3origin-${AWS::StackId}'
+        Enabled: true
+        DefaultRootObject: index.html
+        Origins:
+          - DomainName: !GetAtt S3Bucket.DomainName
+            Id: !Sub 's3origin-${AWS::StackId}'
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}'
+        ViewerCertificate:
+          AcmCertificateArn: !Ref ACMCertificate
+          MinimumProtocolVersion: TLSv1
+          SslSupportMethod: sni-only
+
+  WWWCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: CDN for static website served via S3
+        Aliases: [ !Sub 'www.${Domain}' ]
+        DefaultCacheBehavior:
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachePolicyId: !Ref CachePolicyId
+          Compress: true
+          TargetOriginId: !Sub 'www-s3origin-${AWS::StackId}'
+        Enabled: true
+        DefaultRootObject: index.html
+        Origins:
+          - DomainName: !GetAtt S3Bucket.DomainName
+            Id: !Sub 'www-s3origin-${AWS::StackId}'
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${WWWCloudFrontOriginAccessIdentity}'
+        ViewerCertificate:
+          AcmCertificateArn: !Ref WWWACMCertificate
+          MinimumProtocolVersion: TLSv1
+          SslSupportMethod: sni-only
+
+  DNSRecords:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      Comment: DNS Record for pointing to CloudFront Distribution
+      HostedZoneName: !Ref HostedZone
+      RecordSets:
+        - Name: !Ref Domain
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt CloudFrontDistribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2 # Static hosted zone id when creating alias records to cloudfront distributions.
+        - Name: !Sub 'www.${Domain}'
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt WWWCloudFrontDistribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2 # Static hosted zone id when creating alias records to cloudfront distributions.
+
+
+Outputs:
+  S3BucketName:
+    Value: !Ref S3Bucket
+    Description: The name of the stacks S3 bucket.

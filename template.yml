@@ -5,7 +5,6 @@ Parameters:
   Tier:
     Description: Computing resources tiers
     Type: String
-    Default: Tier1 # TODO - remove this default
     AllowedValues:
       - Tier1
       - Tier2
@@ -20,7 +19,6 @@ Parameters:
     AllowedValues:
       - Java
       - Bedrock
-    Default: Java # TODO - remove this default
 
   TargetServerVersion:
     Description: Desired version of Minecraft to run
@@ -30,7 +28,7 @@ Parameters:
   ShutdownTimeout:
     Description: The amount of time (in minutes) to wait before shutting down after the last player disconnects
     Type: Number
-    Default: 5 # TODO - change back to 10
+    Default: 10
   
   MOTD:
     Description: Initial server message of the day (Note this will be overridden by the server properties)
@@ -46,23 +44,23 @@ Parameters:
   WatchdogImageTag:
     Description: Tag name of the minecraft-watchdog docker image
     Type: String
-    Default: test # TODO - make latest
+    Default: latest
 
   HostedZoneID:
-    Description: The ID of the mc.smarterservers.net. hosted zone
+    Description: The ID of the mc.smarter-servers.net. hosted zone
     Type: String
-    Default: Z035950435PL23XW9G5G4
+    Default: REDACTED
   
   CloudWatchLogsQueryLogGroupArn:
     Type: String
     AllowedPattern: "^arn:.*"
     ConstraintDescription: "Must be a valid ARN"
-    Default: arn:aws:logs:us-east-1:370163806910:log-group:/aws/route53/mc.smarterservers.net:*
+    Default: REDACTED
   
   Domain:
-    Description: The domain (default mc.smarterservers.net)
+    Description: The domain (default mc.smarter-servers.net)
     Type: String
-    Default: mc.smarterservers.net
+    Default: mc.smarter-servers.net
 
 
 Mappings:
@@ -180,11 +178,6 @@ Resources:
 
   EFS:
     Type: AWS::EFS::FileSystem
-    # Properties: 
-      # POSSIBLE TODO
-      # Encrypted: Boolean
-      # FileSystemPolicy: Json
-      # AvailabilityZoneName: String
 
   EFSAccessPoint:
     Type: AWS::EFS::AccessPoint
@@ -414,7 +407,7 @@ Resources:
       Memory: !FindInMap [ ResourceMap, !Ref Tier, TaskMemory ]
       ContainerDefinitions:
         - Name: !Sub 'mc-watchdog-${AWS::StackName}'
-          Image: !Sub 'smarterservers/minecraft-watchdog:${WatchdogImageTag}'
+          Image: REDACTED # SEE 'watchdog' directory for image source code
           # CPU & Memory limits for the watchdog container
           Cpu: '256'
           Memory: '512'
@@ -465,7 +458,7 @@ Resources:
           MountPoints: 
             - ContainerPath: '/data'
               SourceVolume: !Sub 'data-${AWS::StackName}'
-      # TODO - make these two things separate!!!!
+      # TODO - make these two things separate
       # The execution role is what role each of the tasks run in executing, and the TaskRole is what's used for accesing other AWS resources!
       ExecutionRoleArn: !GetAtt TaskDefinitionRole.Arn
       TaskRoleArn: !GetAtt TaskDefinitionRole.Arn
@@ -473,7 +466,6 @@ Resources:
       RequiresCompatibilities: [ FARGATE ]
       Volumes:
         - Name: !Sub 'data-${AWS::StackName}'
-          # Host: String # unsure if this is needed
           EFSVolumeConfiguration:
             AuthorizationConfig: 
               AccessPointId: !Ref EFSAccessPoint
@@ -538,6 +530,7 @@ Resources:
           SECURITY_GROUPS: !Join [ ',', [ !GetAtt VPC.DefaultSecurityGroup, !Ref MCServerSecurityGroup ] ]
       PackageType: Image
       Code:
+        # NOTE: see 'power-on-mc-server-lambda-fn' directory for image source code
         ImageUri: !Sub '${AWS::AccountId}.dkr.ecr.us-east-1.amazonaws.com/power-on-mc-server-lambda-fn:${PowerOnFnTag}'
       Description: Powers on a ECS Minecraft Server task
       TracingConfig:

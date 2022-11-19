@@ -1,0 +1,42 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: "High-level resources that are utilized by the low-level (individual) Minecraft server stacks."
+
+
+Resources:
+  MCSmarterServersDotNet:
+    Type: AWS::Route53::HostedZone
+    Properties: 
+      HostedZoneConfig: 
+        Comment: 'Hosted Zone for mc.smarter-servers.net'
+      Name: mc.smarter-servers.net.
+      QueryLoggingConfig: 
+        CloudWatchLogsLogGroupArn: !GetAtt CloudWatchLogsQueryLogGroup.Arn
+
+  # NOTE - this MUST be made in the us-east-1 region
+  CloudWatchLogsQueryLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 7
+      LogGroupName: "/aws/route53/mc.smarter-servers.net"
+  
+  CloudWatchLogsResourcePolicy:
+    Type: AWS::Logs::ResourcePolicy
+    Properties: 
+      PolicyName: LogsResourcePolicy
+      PolicyDocument: !Sub "{ \"Version\": \"2012-10-17\", \"Statement\": [ { \"Sid\": \"Route53LogsToCloudWatchLogs\", \"Effect\": \"Allow\", \"Principal\": { \"Service\": [ \"route53.amazonaws.com\" ] }, \"Action\": [ \"logs:CreateLogStream\", \"logs:PutLogEvents\" ], \"Resource\": \"${CloudWatchLogsQueryLogGroup.Arn}\" } ] }"
+
+  DNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      Comment: !Sub "Route 53 nameserver records for mc.smarter-servers.net"
+      Name: "mc.smarter-servers.net"
+      ResourceRecords: !GetAtt MCSmarterServersDotNet.NameServers
+      TTL: 60
+      Type: NS
+      HostedZoneName: smarter-servers.net.
+
+
+Outputs:
+  CloudWatchLogsQueryLogGroup:
+    Description: ARN for the CloudWatch Log Group used for DNS queries to mc.smarter-servers.net
+    Value: !GetAtt CloudWatchLogsQueryLogGroup.Arn
