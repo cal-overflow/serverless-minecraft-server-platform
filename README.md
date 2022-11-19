@@ -1,6 +1,6 @@
-# Minecraft Server
+# Serverless Minecraft Server Platform
 
-This repository is an archive of an abandoned project. The project is a serverless Minecraft server built with a variety of AWS resources (most notably ECS). \
+This repository is an archive of an abandoned project. The project is a platform that would allow users to have their very own serverless Minecraft  server built with a variety of AWS resources (most notably ECS). The platform is scalable such that other games could be implemented. \
 Learn more about the project and its complexities [here](https://cal-overflow.dev/post/serverless-minecraft-servers).
 
 #### Project structure
