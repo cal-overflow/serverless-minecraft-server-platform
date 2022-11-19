@@ -1,0 +1,8 @@
+version=0.1
+
+[default.deploy.parameters]
+region = "us-east-1"
+resolve_image_repos = true
+confirm_changeset = false
+fail_on_empty_changeset = false
+capabilities = "CAPABILITY_NAMED_IAM"
